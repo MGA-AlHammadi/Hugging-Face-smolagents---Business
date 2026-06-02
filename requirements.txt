@@ -6,3 +6,5 @@ seaborn
 huggingface_hub
 duckduckgo-search
 python-dotenv
+openpyxl
+
