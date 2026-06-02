@@ -36,15 +36,19 @@ load_dotenv()
 
 # 2. Funktion für die Datenanalyse (Backend)
 def analyze_business_data(hf_token, file, user_query):
-    # Validierung der Eingaben
-    if not hf_token or not hf_token.startswith("hf_"):
-        return "Bitte geben Sie einen gültigen Hugging Face API-Token ein (beginnt mit hf_)!", None
+    # Nutze den eingegebenen Token oder, falls leer, den aus der .env Datei
+    active_token = hf_token.strip() if hf_token and hf_token.strip() else os.getenv("HF_TOKEN")
+    
+    # Validierung
+    if not active_token or not active_token.startswith("hf_"):
+        return "Kein gültiger API-Token gefunden! Bitte gib einen Token ein oder setze ihn in der .env Datei.", None
+    
     if file is None:
         return "Bitte laden Sie zuerst eine CSV-Datei hoch!", None
     
     try:
-        # KI-Modell mit dem dynamischen Token des Nutzers initialisieren
-        model = InferenceClientModel(model_id="Qwen/Qwen2.5-Coder-32B-Instruct", token=hf_token)
+        # KI-Modell mit dem gewählten Token initialisieren
+        model = InferenceClientModel(model_id="Qwen/Qwen2.5-Coder-32B-Instruct", token=active_token)
         
         # Agent erstellen
         agent = CodeAgent(
@@ -87,10 +91,10 @@ with gr.Blocks() as demo:
     
     with gr.Row():
         with gr.Column():
-            # Feld für den API-Token mit deinem Standard-Key aus der .env Datei
+            # Feld für den API-Token (Bleibt leer für maximale Sicherheit)
             token_input = gr.Textbox(
-                label="1. Hugging Face Access Token (hf_...)", 
-                value=os.getenv("HF_TOKEN", ""),
+                label="1. Hugging Face Access Token (Optional, falls .env genutzt wird)", 
+                placeholder="hf_...",
                 type="password"
             )
             file_input = gr.File(label="2. CSV-Datei hochladen", file_types=[".csv"])
