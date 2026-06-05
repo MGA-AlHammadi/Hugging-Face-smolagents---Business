@@ -16,7 +16,8 @@ REQUIRED_PACKAGES = {
     "duckduckgo_search": "duckduckgo-search",
     "ddgs": "ddgs",
     "dotenv": "python-dotenv",
-    "openpyxl": "openpyxl"
+    "openpyxl": "openpyxl",
+    "fpdf": "fpdf2"
 }
 
 for module_name, package_name in REQUIRED_PACKAGES.items():
@@ -31,6 +32,7 @@ import gradio as gr
 import pandas as pd
 from smolagents import CodeAgent, InferenceClientModel
 from dotenv import load_dotenv
+from utils import create_pdf_report
 
 # .env Datei laden
 load_dotenv()
@@ -115,13 +117,17 @@ def analyze_business_data(hf_token, file, user_query):
         
         # Prüfen, ob ein Diagramm erstellt wurde
         image_path = CHART_FILENAME if os.path.exists(CHART_FILENAME) else None
-        return agent_response, image_path
+        
+        # PDF Bericht erstellen
+        pdf_path = create_pdf_report(agent_response, image_path)
+        
+        return agent_response, image_path, pdf_path
         
     except Exception as e:
         error_msg = f"❌ Ein Fehler ist aufgetreten: {str(e)}"
         if "401" in str(e) or "Unauthorized" in str(e):
             error_msg += "\n\nHinweis: Ihr Hugging Face Token ist wahrscheinlich ungültig oder abgelaufen."
-        return error_msg, None
+        return error_msg, None, None
 
 # 4. Benutzeroberfläche erstellen (Frontend mit Gradio)
 with gr.Blocks() as demo:
@@ -163,6 +169,7 @@ with gr.Blocks() as demo:
         with gr.Column():
             output_text = gr.Textbox(label="KI-Analysenbericht", lines=10)
             output_image = gr.Image(label="Generiertes Diagramm")
+            output_pdf = gr.File(label="PDF-Bericht herunterladen")
             
     # Events verknüpfen
     # 1. Automatische Übersicht beim Hochladen (Pkt 4)
@@ -176,7 +183,7 @@ with gr.Blocks() as demo:
     submit_btn.click(
         fn=analyze_business_data, 
         inputs=[token_input, file_input, query_input], 
-        outputs=[output_text, output_image]
+        outputs=[output_text, output_image, output_pdf]
     )
 
 if __name__ == "__main__":

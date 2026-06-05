@@ -6,6 +6,7 @@ Dieses Projekt nutzt Hugging Face `smolagents`, um eine autonome Datenanalyse au
 - Autonome Code-Generierung für Datenanalyse.
 - Erstellung von Diagrammen (Matplotlib/Seaborn).
 - Deutschsprachige Interaktion.
+- **Export der Analyse als PDF-Bericht.**
 
 ## Installation
 
