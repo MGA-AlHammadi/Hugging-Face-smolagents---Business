@@ -1,192 +1,99 @@
-import subprocess
-import sys
 import os
-
-CHART_FILENAME = "chart.png"
-
-# 1. Automatische Installation fehlender Bibliotheken
-# (Wichtig: Das Dictionary ordnet dem Modulnamen den Paketnamen für pip zu)
-REQUIRED_PACKAGES = {
-    "smolagents": "smolagents",
-    "gradio": "gradio",
-    "pandas": "pandas",
-    "matplotlib": "matplotlib",
-    "seaborn": "seaborn",
-    "huggingface_hub": "huggingface_hub",
-    "duckduckgo_search": "duckduckgo-search",
-    "ddgs": "ddgs",
-    "dotenv": "python-dotenv",
-    "openpyxl": "openpyxl",
-    "fpdf": "fpdf2"
-}
-
-for module_name, package_name in REQUIRED_PACKAGES.items():
-    try:
-        __import__(module_name)
-    except ImportError:
-        print(f"Bibliothek '{package_name}' fehlt. Installiere automatisch...")
-        subprocess.check_call([sys.executable, "-m", "pip", "install", package_name])
-
-# Erst nach Überprüfung die Bibliotheken importieren
+import logging
 import gradio as gr
 import pandas as pd
-from smolagents import CodeAgent, InferenceClientModel
-from dotenv import load_dotenv
+from typing import Tuple, Optional
+
+# Import der logischen Module (Strukturierte Trennung)
+from agent import run_business_analysis
+from data_loader import load_and_prepare_data, generate_data_overview_md
 from utils import create_pdf_report
 
-# .env Datei laden
-load_dotenv()
+# Globales Logging Setup
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# 2. Hilfsfunktion für die Datenübersicht
-def get_data_overview(file):
-    if file is None:
-        return ""
-    try:
-        if file.name.endswith(".xlsx"):
-            df = pd.read_excel(file.name)
-        else:
-            df = pd.read_csv(file.name)
-        
-        num_rows = len(df)
-        num_cols = len(df.columns)
-        col_names = ", ".join(df.columns.tolist())
-        
-        overview = f"""### ✅ Hochgeladene Datenübersicht
-- **Anzahl der Zeilen:** {num_rows}
-- **Anzahl der Spalten:** {num_cols}
-- **Spaltennamen:** {col_names}
-"""
-        return overview
-    except Exception as e:
-        return f"❌ Fehler beim Lesen der Datei für die Übersicht: {str(e)}"
+def process_analysis(hf_token: str, file_obj, user_query: str) -> Tuple[str, Optional[str], Optional[str]]:
+    """
+    Hauptfunktion, die Backend-Logik mit Frontend-Events verbindet.
+    """
+    # Validierung: Wurden alle nötigen Daten geliefert?
+    if not file_obj:
+        return "⚠️ Bitte laden Sie zuerst eine Datei hoch.", None, None
+    
+    if not user_query.strip():
+        return "⚠️ Bitte geben Sie eine Frage zur Analyse ein.", None, None
 
-# 3. Funktion für die Datenanalyse (Backend)
-def analyze_business_data(hf_token, file, user_query):
-    # Nutze den eingegebenen Token oder, falls leer, den aus der .env Datei
-    active_token = hf_token.strip() if hf_token and hf_token.strip() else os.getenv("HF_TOKEN")
-    
-    # Validierung des Tokens
-    if not active_token:
-        return "❌ Kein API-Token gefunden! Bitte gib einen Token ein oder setze ihn in der .env Datei.", None
-    if not active_token.startswith("hf_"):
-        return "❌ Der API-Token scheint ungültig zu sein (muss mit 'hf_' beginnen).", None
-    
-    if file is None:
-        return "❌ Bitte laden Sie zuerst eine Datei (.csv oder .xlsx) hoch!", None
-    
-    try:
-        # Datei einlesen (CSV oder Excel)
-        if file.name.endswith(".xlsx"):
-            df = pd.read_excel(file.name)
-        else:
-            # Versuch es mit Standard-CSV-Einleser
-            try:
-                df = pd.read_csv(file.name)
-            except Exception:
-                # Fallback für andere Trennzeichen
-                df = pd.read_csv(file.name, sep=None, engine='python')
-                
-        # Als CSV speichern, damit der Agent sie findet (wie gewünscht)
-        df.to_csv("business_data.csv", index=False)
-        
-        # KI-Modell mit dem gewählten Token initialisieren
-        model = InferenceClientModel(model_id="Qwen/Qwen2.5-Coder-32B-Instruct", token=active_token)
-        
-        # Agent erstellen
-        agent = CodeAgent(
-            tools=[], 
-            model=model,
-            additional_authorized_imports=["pandas", "matplotlib", "matplotlib.pyplot", "seaborn"],
-            add_base_tools=True
-        )
-        
-        # System-Anweisung für den Agenten
-        full_instruction = f"""
-        Du bist ein professioneller Datenanalyst für ein Unternehmen.
-        Du hast eine Datendatei namens 'business_data.csv'.
-        Die Anfrage des Nutzers lautet: "{user_query}"
-        
-        WICHTIGE ANWEISUNGEN:
-        1. Antworte komplett auf Deutsch.
-        2. Wenn der Nutzer ein Diagramm (Plot/Chart) anfordert, speichere es IMMER als '{CHART_FILENAME}'.
-        3. Nutze deutsche Beschriftungen (Labels und Titel) im Diagramm.
-        """
-        
-        # Agent startet die Analyse
-        agent_response = agent.run(full_instruction)
-        
-        # Prüfen, ob ein Diagramm erstellt wurde
-        image_path = CHART_FILENAME if os.path.exists(CHART_FILENAME) else None
-        
-        # PDF Bericht erstellen
-        pdf_path = create_pdf_report(agent_response, image_path)
-        
-        return agent_response, image_path, pdf_path
-        
-    except Exception as e:
-        error_msg = f"❌ Ein Fehler ist aufgetreten: {str(e)}"
-        if "401" in str(e) or "Unauthorized" in str(e):
-            error_msg += "\n\nHinweis: Ihr Hugging Face Token ist wahrscheinlich ungültig oder abgelaufen."
-        return error_msg, None, None
+    # 1. Daten vorbereiten (Einlesen & Konvertieren)
+    df = load_and_prepare_data(file_obj)
+    if df is None:
+        return "❌ Datei konnte nicht verarbeitet werden.", None, None
 
-# 4. Benutzeroberfläche erstellen (Frontend mit Gradio)
-with gr.Blocks() as demo:
-    gr.Markdown("# 📊 KI-gestützter Business Data Analyst (smolagents)")
-    gr.Markdown("Richten Sie Ihren API-Zugang ein, laden Sie Ihre Datei (.csv oder .xlsx) hoch und starten Sie die autonome Analyse.")
+    # 2. KI-Agenten starten (Ergebnisse abholen)
+    response_text, image_path = run_business_analysis(user_query, hf_token)
+    
+    # 3. PDF aus den Ergebnissen erstellen
+    pdf_path = create_pdf_report(response_text, image_path)
+    
+    return response_text, image_path, pdf_path
+
+# Definition der Benutzeroberfläche (Gradio Layout)
+with gr.Blocks(theme=gr.themes.Soft(), title="AI Business Analyst Pro") as demo:
+    gr.Markdown("# 🏢 AI Business Analyst (Pro)")
+    gr.Markdown("Laden Sie Ihre Geschäftsdaten hoch und lassen Sie die KI die Auswertung übernehmen.")
     
     with gr.Row():
-        with gr.Column():
-            # Feld für den API-Token (Bleibt leer für maximale Sicherheit)
+        # Bereich für Konfiguration und Datei-Upload
+        with gr.Column(scale=1):
             token_input = gr.Textbox(
-                label="1. Hugging Face Access Token (Optional, falls .env genutzt wird)", 
-                placeholder="hf_...",
-                type="password"
+                label="Hugging Face API Token", 
+                placeholder="hf_...", 
+                type="password",
+                info="Optional: Wird nur benötigt, wenn keine .env Datei existiert."
             )
-            file_input = gr.File(label="2. Datei hochladen (.csv, .xlsx)", file_types=[".csv", ".xlsx"])
+            file_input = gr.File(label="Excel/CSV Quelldatei", file_types=[".csv", ".xlsx"])
+            data_overview = gr.Markdown("### Status\nWarte auf Datei...")
             
-            # Neue Übersichtskomponente
-            data_overview = gr.Markdown(label="Hochgeladene Datenübersicht")
-            
+        # Bereich für Nutzeranfragen und Ergebnisse
+        with gr.Column(scale=2):
             query_input = gr.Textbox(
-                label="3. Was möchten Sie wissen?", 
-                placeholder="z.B.: Zeige mir den Umsatz pro Produkt als Balkendiagramm.",
+                label="Analyse-Auftrag", 
+                placeholder="z.B. Erstelle eine Trendanalyse der Verkäufe.", 
                 lines=3
             )
+            submit_btn = gr.Button("Analyse jetzt starten 🚀", variant="primary")
             
-            # Beispiel-Fragen (Pkt 5)
+            # Beispiele für neue Nutzer
             gr.Examples(
                 examples=[
-                    ["Zeige mir die ersten 5 Zeilen der Daten."],
-                    ["Wie viele Datensätze gibt es insgesamt?"],
-                    ["Welches Produkt hat den höchsten Umsatz?"],
-                    ["Erstelle ein Kreisdiagramm der Verkaufsregionen."]
+                    "Fasse die wichtigsten Kennzahlen zusammen.", 
+                    "Erstelle ein Diagramm über die Umsatzverteilung."
                 ],
                 inputs=query_input
             )
-            
-            submit_btn = gr.Button("Analyse starten 🚀", variant="primary")
-            
-        with gr.Column():
-            output_text = gr.Textbox(label="KI-Analysenbericht", lines=10)
-            output_image = gr.Image(label="Generiertes Diagramm")
-            output_pdf = gr.File(label="PDF-Bericht herunterladen")
-            
-    # Events verknüpfen
-    # 1. Automatische Übersicht beim Hochladen (Pkt 4)
+
+    # Anzeige-Bereiche für die Analyse-Ergebnisse
+    with gr.Row():
+        output_text = gr.Textbox(label="Bericht (Text)", lines=10)
+        output_image = gr.Image(label="Grafik/Visualisierung")
+        output_pdf = gr.File(label="Download PDF-Bericht")
+
+    # Logik: Was passiert bei Interaktionen?
+    # Wenn eine Datei hochgeladen wird -> Zeige Übersicht
     file_input.change(
-        fn=get_data_overview,
-        inputs=[file_input],
+        fn=lambda f: generate_data_overview_md(load_and_prepare_data(f)), 
+        inputs=[file_input], 
         outputs=[data_overview]
     )
     
-    # 2. Analyse-Sitzung
+    # Wenn der Start-Button geklickt wird -> Starte Prozess
     submit_btn.click(
-        fn=analyze_business_data, 
+        fn=process_analysis, 
         inputs=[token_input, file_input, query_input], 
         outputs=[output_text, output_image, output_pdf]
     )
 
+# App-Start
 if __name__ == "__main__":
-    if os.path.exists(CHART_FILENAME):
-        os.remove(CHART_FILENAME)
-    demo.launch(theme=gr.themes.Soft())
+    logger.info("Anwendung wird gestartet...")
+    demo.launch()
