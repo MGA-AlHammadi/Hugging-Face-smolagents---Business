@@ -1,33 +1,39 @@
 import os
 from dotenv import load_dotenv
-from smolagents import CodeAgent, InferenceClientModel
+from smolagents import CodeAgent, LiteLLMModel
 
 # Zentrale Konfiguration
 CHART_FILENAME = "chart.png"
-MODEL_ID = "Qwen/Qwen2.5-Coder-32B-Instruct"
+MODEL_ID = "gemini/gemini-2.5-flash"
 
 # API-Keys aus .env laden
 load_dotenv()
 
-def run_business_analysis(user_query, hf_token=None):
+def run_business_analysis(user_query, hf_token=None, mode="📊 Business Analysis Mode"):
     """
     Kernfunktion: Initialisiert die KI und führt den Python-Code zur Analyse aus.
     """
-    # Sicherheit: Token aus UI bevorzugen, sonst aus Umgebungsvariablen
-    active_token = hf_token.strip() if hf_token and hf_token.strip() else os.getenv("HF_TOKEN")
+    # Sicherheit: Gemini API-Key aus Umgebungsvariablen bevorzugen
+    gemini_key = os.getenv("GEMINI_API_KEY")
     
-    if not active_token:
-        return "❌ Fehler: Kein API-Token gefunden.", None
+    if not gemini_key:
+        return "❌ Fehler: Kein GEMINI_API_KEY in der .env gefunden.", None
+    
+    # Pfad zur Datenbasis bestimmen
+    data_file = "crm_master_data.csv" if mode == "👤 CRM Analytics Mode" else "business_data.csv"
     
     # Sicherstellen, dass die Datei existiert, bevor der Agent startet
-    if not os.path.exists("business_data.csv"):
-        return "❌ Fehler: Datenbasis fehlt. Bitte Datei hochladen.", None
+    if not os.path.exists(data_file):
+        return f"❌ Fehler: Datenbasis ({data_file}) fehlt. Bitte Datei hochladen.", None
 
     try:
-        # Modell-Anbindung konfigurieren
-        model = InferenceClientModel(model_id=MODEL_ID, token=active_token)
+        # Modell-Anbindung konfiguriert für Gemini via LiteLLM (smolagents Standard für Gemini)
+        model = LiteLLMModel(
+            model_id=MODEL_ID,
+            api_key=gemini_key
+        )
         
-        # Der CodeAgent darf Python-Bibliotheken zur Analyse nutzen
+        # Der CodeAgent nutzt nun das Gemini-Modell
         agent = CodeAgent(
             tools=[], 
             model=model,
@@ -36,15 +42,37 @@ def run_business_analysis(user_query, hf_token=None):
         )
         
         # System-Anweisung: Definiert Rolle und Regeln für die KI
-        instruction = f"""
-        Du bist ein Business Analyst. Nutze die Daten in 'business_data.csv'.
-        Anfrage: "{user_query}"
-        
-        Regeln:
-        1. Antworte immer auf Deutsch.
-        2. Visualisierungen MÜSSEN als '{CHART_FILENAME}' gespeichert werden.
-        3. Nutze saubere Diagramm-Beschriftungen.
-        """
+        if mode == "👤 CRM Analytics Mode":
+            instruction = f"""
+            Du bist der Chief CRM & Sales Analytics Officer. Nutze die Daten in '{data_file}'.
+            Die Daten enthalten Kunden-Zusammenführungen (Customers, Deals, Interactions).
+            Felder umfassen: customer_id, Standortinformationen (z.B. country, region, branch, location), deal_value, stage (Lead, Negotiation, Won, Lost), und Interaktionsdaten.
+            
+            Anfrage: "{user_query}"
+            
+            Regeln:
+            1. Antworte immer auf Deutsch.
+            2. Visualisierungen MÜSSEN als '{CHART_FILENAME}' gespeichert werden.
+            3. CRM-Kernmetriken (Standardanalysen):
+               - Identifiziere die Top 5 Kunden nach Umsatzpotenzial.
+               - Analysiere die Conversion Rate zwischen den Phasen Lead, Negotiation und Won.
+               - Hebe Kunden mit hohem Risiko für Abwanderung (Churn Risk aufgrund mangelnder Interaktionen) hervor.
+            4. Geografische Analyse & Management-Warnungen:
+               - Falls Spalten wie 'country', 'region', 'branch', 'location' oder ähnliche vorhanden sind, führe eine Standort-Performance-Analyse durch.
+               - Falls die Daten auf eine qualitative und quantitative Unterperformance hinweisen (unter Berücksichtigung des Gesamtwerts der Won-Deals vs. Lost-Deals), formuliere eine Management-Warnung.
+               - Begründe Warnungen streng mit den vorliegenden Kennzahlen (Umsatz, Margen, Quoten), um Halluzinationen zu vermeiden.
+            5. Erstelle klare Handlungsempfehlungen für das Management.
+            """
+        else:
+            instruction = f"""
+            Du bist ein Business Analyst. Nutze die Daten in '{data_file}'.
+            Anfrage: "{user_query}"
+            
+            Regeln:
+            1. Antworte immer auf Deutsch.
+            2. Visualisierungen MÜSSEN als '{CHART_FILENAME}' gespeichert werden.
+            3. Nutze saubere Diagramm-Beschriftungen.
+            """
         
         # Bereinigung: Altes Bild löschen, falls vorhanden
         if os.path.exists(CHART_FILENAME):
