@@ -42,6 +42,10 @@ def run_business_analysis(user_query, hf_token=None, mode="📊 Business Analysi
         )
         
         # System-Anweisung: Definiert Rolle und Regeln für die KI
+        validation_instruction = """
+        Egal welche Frage der Nutzer stellt oder welcher Modus aktiv ist: Berechne nicht nur die nackten Zahlen, sondern füge im PDF-Bericht immer einen Abschnitt 'Mathematische & Logische Validierung' hinzu. Erkläre dort kurz und präzise auf Deutsch, warum dieses Ergebnis korrekt ist und über welche Code-/Formel-Logik es berechnet wurde (z.B. Erkläre den Rechenweg oder die gefilterten Kriterien), damit der Nutzer die Korrektheit zu 100% nachvollziehen kann.
+        """
+        
         if mode == "👤 CRM Analytics Mode":
             instruction = f"""
             Du bist der Chief CRM & Sales Analytics Officer. Nutze die Daten in '{data_file}'.
@@ -62,6 +66,7 @@ def run_business_analysis(user_query, hf_token=None, mode="📊 Business Analysi
                - Falls die Daten auf eine qualitative und quantitative Unterperformance hinweisen (unter Berücksichtigung des Gesamtwerts der Won-Deals vs. Lost-Deals), formuliere eine Management-Warnung.
                - Begründe Warnungen streng mit den vorliegenden Kennzahlen (Umsatz, Margen, Quoten), um Halluzinationen zu vermeiden.
             5. Erstelle klare Handlungsempfehlungen für das Management.
+            {validation_instruction}
             """
         else:
             instruction = f"""
@@ -72,6 +77,7 @@ def run_business_analysis(user_query, hf_token=None, mode="📊 Business Analysi
             1. Antworte immer auf Deutsch.
             2. Visualisierungen MÜSSEN als '{CHART_FILENAME}' gespeichert werden.
             3. Nutze saubere Diagramm-Beschriftungen.
+            {validation_instruction}
             """
         
         # Bereinigung: Altes Bild löschen, falls vorhanden
